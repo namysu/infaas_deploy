@@ -162,3 +162,14 @@ REQUEST_LOG = _s("REQUEST_LOG", "")            # JSON-lines per request, "" = of
 EVENT_LOG = _s("EVENT_LOG", "")                # JSON-lines scaling/state events
 
 WORKER_LABEL = "app=infaas-worker"
+
+# ---------------------------------------------------------------- orchestrator
+# [N] Where workers come from (the original: EC2 VMs).
+#   k8s     worker pods found through the Kubernetes API (k8s/*.yaml)
+#   static  a fixed list in STATIC_WORKERS, checked by gRPC heartbeat — docker on
+#           one or more hosts without a cluster manager (deploy/docker/)
+ORCHESTRATOR = _s("ORCHESTRATOR", "k8s").lower()
+# "name=gpu_type@host:port,..." — written by deploy/docker/gen_compose.py
+STATIC_WORKERS = _s("STATIC_WORKERS", "")
+# consecutive failed heartbeats before a static worker counts as down
+STATIC_FAIL_THRESHOLD = _i("STATIC_FAIL_THRESHOLD", 3)

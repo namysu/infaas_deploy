@@ -13,6 +13,11 @@ Every VM_AUTOSCALER_INTERVAL_S (2 s [P §5]):
 
 WORKER_MODE=static (default) keeps every GPU's worker up, as Lumina does, so
 step 3 is skipped; steps 1-2 run in both modes.
+
+Workers come from an orchestrator adapter chosen by ORCHESTRATOR: `k8s`
+(k8s_adapter.K8s, pods) or `static` (static_workers.StaticWorkers, a fixed
+list for docker deployments). Both offer list_workers / create_worker /
+delete_pod; the static one cannot create or delete, so it allows static mode only.
 """
 from __future__ import annotations
 
@@ -24,7 +29,7 @@ from typing import Dict, List, Set
 import grpc
 
 from infaas.common import config, events, hardware
-from infaas.controller.k8s_adapter import K8s, PodInfo
+from infaas.controller.k8s_adapter import PodInfo
 from infaas.controller.state import WorkerClients
 from infaas.metadata.redis_metadata import RedisMetadata
 from infaas.policy import scaling, states
@@ -35,7 +40,8 @@ log = logging.getLogger("vm-autoscaler")
 
 
 class VMAutoscaler:
-    def __init__(self, md: RedisMetadata, k8s: K8s, mode: str = config.WORKER_MODE) -> None:
+    def __init__(self, md: RedisMetadata, k8s, mode: str = config.WORKER_MODE) -> None:
+        # `k8s` is the orchestrator adapter (K8s or StaticWorkers); name kept from v1
         if mode not in ("static", "dynamic"):
             raise ValueError(f"WORKER_MODE={mode!r}: use static or dynamic")
         self.md = md
@@ -82,7 +88,7 @@ class VMAutoscaler:
         for n, p in live.items():
             if n in registered or n in self.retiring:
                 continue
-            addr = f"{p.ip}:{config.WORKER_PORT}"
+            addr = p.addr or f"{p.ip}:{config.WORKER_PORT}"
             if not self._heartbeat(addr):
                 continue
             self.md.add_executor(n, addr, p.hw, managed=p.managed)
@@ -200,7 +206,21 @@ def main() -> None:
         except Exception:  # noqa: BLE001
             log.info("waiting for redis ...")
             time.sleep(1.0)
-    VMAutoscaler(md, K8s()).run()
+    VMAutoscaler(md, make_orchestrator()).run()
+
+
+def make_orchestrator():
+    if config.ORCHESTRATOR == "k8s":
+        from infaas.controller.k8s_adapter import K8s
+        return K8s()
+    if config.ORCHESTRATOR == "static":
+        if config.WORKER_MODE != "static":
+            raise SystemExit("ORCHESTRATOR=static runs a fixed worker list: set WORKER_MODE=static")
+        from infaas.controller.static_workers import StaticWorkers
+        orch = StaticWorkers.from_config()
+        log.info("static workers: %s", ", ".join(f"{w.name}({w.hw})@{w.addr}" for w in orch.workers))
+        return orch
+    raise SystemExit(f"ORCHESTRATOR={config.ORCHESTRATOR!r}: use k8s or static")
 
 
 if __name__ == "__main__":

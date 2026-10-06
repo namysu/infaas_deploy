@@ -33,6 +33,7 @@ class PodInfo:
     phase: str
     managed: bool          # created by the autoscaler
     deleting: bool
+    addr: str = ""         # host:port; empty -> "<ip>:WORKER_PORT" (k8s: every pod on :9000)
 
 
 class K8s:

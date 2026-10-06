@@ -28,7 +28,9 @@ log = logging.getLogger("worker")
 
 
 def serve() -> None:
-    name = os.environ.get("POD_NAME") or os.uname().nodename
+    # WORKER_NAME (docker) or POD_NAME (k8s downward API); must match the name the
+    # VM-Autoscaler registers it under
+    name = os.environ.get("WORKER_NAME") or os.environ.get("POD_NAME") or os.uname().nodename
     hw = os.environ["GPU_TYPE"]
     log.info("worker %s gpu=%s preprocessing=%s", name, hw, dali_preprocess.status())
     log.info("preload: %s", preload_libs.preload())

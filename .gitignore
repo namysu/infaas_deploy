@@ -257,3 +257,4 @@ profiles/
 bench/
 
 *.tar
+deploy/docker/generated/
