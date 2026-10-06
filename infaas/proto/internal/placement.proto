@@ -1,0 +1,37 @@
+// Worker -> controller placement requests (infaas_k8s addition).
+//
+// Paper §4.2.2: "if the strategy requires more resources than are available on
+// the current worker (e.g., hardware accelerator), the worker coordinates with
+// the controller to load the variant on a capable worker." With one GPU per
+// worker pod, every replicate/upgrade/downgrade targets another worker, so the
+// Model-Autoscaler decides and the controller places.
+// Paper §4.1: interfered variants -> "the worker asks the controller's
+// Dispatcher to place the variant on the least-loaded worker" (kind = migrate).
+
+syntax = "proto3";
+
+package infaas.internal;
+
+import "infaas/proto/internal/infaas_request_status.proto";
+
+service Placement {
+  rpc RequestScale(ScaleActionRequest) returns (ScaleActionResponse) {}
+}
+
+message ScaleOption {
+  string kind = 1;         // replicate | upgrade | downgrade | migrate
+  string src_variant = 2;  // variant on the requesting worker
+  string dst_variant = 3;  // variant to load elsewhere
+  int32 count = 4;         // instances of dst_variant to add
+  double cost = 5;         // ILP objective value of this option (paper §4.2.1)
+}
+
+message ScaleActionRequest {
+  string src_worker = 1;
+  repeated ScaleOption options = 2;  // cheapest first; the controller takes the first feasible
+  string reason = 3;
+}
+
+message ScaleActionResponse {
+  InfaasRequestStatus status = 1;
+}

@@ -1,0 +1,77 @@
+# INFaaS workers on the a5000 node: one pod per GPU (the paper's worker VM).
+# Pod settings follow Lumina's new_podexecutor/k8s/worker-a5000.yaml @8eb588c
+# (GPU, preprocessing mode, weights hostPath) [PLAN A-03..A-07].
+# WORKER_MODE=static: these replicas are the workers.
+# WORKER_MODE=dynamic: scaled to 0; the VM-Autoscaler creates pods from this
+# template with infaas-mode=dynamic, which this selector does not match.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infaas-worker-a5000
+  namespace: infaas
+  labels:
+    app: infaas-worker
+    gpu: a5000
+spec:
+  strategy:
+    type: Recreate          # each pod holds a whole GPU
+  replicas: 2
+  selector:
+    matchLabels:
+      app: infaas-worker
+      gpu: a5000
+      infaas-mode: static
+  template:
+    metadata:
+      labels:
+        app: infaas-worker
+        gpu: a5000
+        infaas-mode: static
+    spec:
+      nodeSelector:
+        gpu: a5000
+      containers:
+        - name: worker
+          image: infaas-worker:0.1.0
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef:
+                name: infaas-config
+          env:
+            - name: GPU_TYPE
+              value: "a5000"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: REDIS_HOST
+              value: "infaas-redis.infaas.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "16379"
+            - name: CONTROLLER_ADDR
+              value: "infaas-controller.infaas.svc.cluster.local:50054"
+            # same preprocessing as Lumina on this GPU
+            - name: PREPROCESS_BACKEND
+              value: "auto"
+            - name: PREPROCESS_MODE
+              value: "cpu_decode_gpu"
+          ports:
+            - containerPort: 9000
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: models
+              mountPath: /models
+          readinessProbe:
+            grpc:
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 40
+            timeoutSeconds: 3
+      volumes:
+        - name: models
+          hostPath:
+            path: /data/podexec-models
+            type: DirectoryOrCreate

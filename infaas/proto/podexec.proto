@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package podexec;
+
+// Client app -> Server. Same fields as the old JSON /infer, but the image is
+// raw JPEG bytes (no base64) so there is no encode/decode cost and the payload
+// is ~33% smaller.
+service Executor {
+  rpc Infer(InferRequest) returns (InferReply);
+}
+
+// Server -> Worker. The server forwards the (resolved) model id and the raw
+// image bytes; no second base64 round-trip.
+service Worker {
+  rpc Run(RunRequest) returns (RunReply);
+}
+
+message InferRequest {
+  string model = 1;   // short name, e.g. "resnet-50"
+  bytes  image = 2;   // raw JPEG bytes
+  double slo   = 3;   // milliseconds
+  // Placement policy, selected per request for A/B comparison:
+  //   "" or "smart" -> predictor + SLO scheduler + admission ( OURS, default)
+  //   "roundrobin"  -> vanilla k8s style: cycle over all workers, no admission
+  //   "predict"     -> return per-GPU estimates only, run no inference
+  string dispatch = 4;
+}
+
+// One detected object. Coordinates are absolute pixels in the ORIGINAL frame
+// (top-left origin), so the edge can draw the box directly without rescaling.
+message Box {
+  double x1    = 1;   // left
+  double y1    = 2;   // top
+  double x2    = 3;   // right
+  double y2    = 4;   // bottom
+  string label = 5;   // class name (e.g. "car", "person")
+  double score = 6;   // confidence 0..1
+}
+
+message InferReply {
+  string request_name = 1;
+  string inference    = 2;   // summary label; "N objects" for detection
+  double latency      = 3;   // total ms
+  string gpu          = 4;   // chosen GPU type ("" when rejected)
+  bool   rejected     = 5;
+  string reason       = 6;   // populated when rejected
+  map<string, double> estimates = 7;  // per-target est ms (for transparency)
+  // Detection results: every box the model found (empty for classification).
+  repeated Box detections = 8;
+  int32 img_width  = 9;   // original frame size the boxes are drawn against
+  int32 img_height = 10;
+  // Why a request was rejected (so experiments never conflate them):
+  //   "admission"   -> scheduler judged the SLO unmeetable (intended defense)
+  //   "saturation"  -> no idle worker within the wait timeout (overload)
+  //   "bad_request" -> unknown model / undecodable image
+  //   ""            -> not rejected
+  string reject_kind = 11;
+  // Predictor round-trip (preprocess_resp + inference_resp) ms; smart/predict only.
+  double predict_ms = 12;
+  // Worker-measured service time (RunReply.latency). Server total minus this is
+  // the transfer/decode/gRPC overhead — used to calibrate the ETA model.
+  double worker_ms = 13;
+  // Per-stage breakdown in ms, filled only when the client asks for it. Server
+  // stages are prefixed "srv.", the worker's own are merged in under "worker.",
+  // and the predictor's expectation for the chosen GPU under "pred." so the
+  // script can compare predicted against measured without a second call.
+  map<string, double> timings = 14;
+  // Wall-clock (unix epoch ms) at request arrival and at reply construction.
+  // The load generator runs on the same host as the server, so these share a
+  // clock with it and give the one-way client<->server transit that a duration
+  // measured inside either process cannot.
+  double arrive_epoch_ms = 15;
+  double reply_epoch_ms = 16;
+}
+
+message RunRequest {
+  string model = 1;   // full HF id, e.g. "microsoft/resnet-50"
+  bytes  image = 2;   // raw JPEG bytes
+}
+
+message RunReply {
+  string inference    = 1;   // summary label; "N objects" for detection
+  double latency      = 2;   // worker-measured ms
+  bool   model_loaded = 3;   // whether a GPU swap happened this call
+  repeated Box boxes  = 4;   // detection results (empty for classification)
+  // Per-stage breakdown in ms: decode / preprocess / gpu-lock wait / swap /
+  // forward / postprocess. `latency` alone hides the lock wait, which is where
+  // queueing shows up once several requests share a worker.
+  map<string, double> timings = 5;
+}

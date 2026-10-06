@@ -1,0 +1,48 @@
+// Public API for users to register models with INFaaS.
+// Ported from INFaaS protos/modelreg.proto. Original fields unchanged; fields
+// marked "infaas_k8s" are additions.
+
+syntax = "proto3";
+
+package infaaspublic.infaasmodelreg;
+
+import "infaas/proto/request_reply.proto";
+
+service ModelReg {
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {}
+
+  // Register a model. The Variant-Generator/Profiler run behind this call
+  // (paper §3.2): one variant per GPU type, profiled on a worker of that type.
+  rpc RegisterModel(ModelRegRequest) returns (ModelRegResponse) {}
+}
+
+message ModelRegRequest {
+  string submitter = 1;          // "tester" + profile_json = register a stored profile
+  string grandparent_model = 2;
+  string parent_model = 3;       // Lumina short model name, e.g. "resnet-50"
+  string first_variant = 4;
+  string url = 5;                // HF repo id; resolved from parent_model if empty
+  string dataset = 6;
+  float accuracy = 7;
+  string framework = 8;
+  string task = 9;
+  string config_name = 10;
+  // ---- infaas_k8s additions ----
+  bytes profile_image = 11;      // JPEG the Variant-Profiler measures with
+  repeated string hardware = 12; // GPU types to generate variants for (default: all)
+  bool reprofile = 13;           // ignore stored profiles and measure again
+  string profile_json = 14;      // with submitter == "tester": one variant profile
+}
+
+message ModelRegResponse {
+  RequestReply status = 1;
+  repeated string variants = 2;  // infaas_k8s: registered variant names
+}
+
+message HeartbeatRequest {
+  RequestReply status = 1;
+}
+
+message HeartbeatResponse {
+  RequestReply status = 1;
+}

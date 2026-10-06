@@ -1,0 +1,71 @@
+// Master -> worker query service.
+// Ported from INFaaS protos/internal/query.proto. Original fields unchanged;
+// fields marked "infaas_k8s" are additions.
+
+syntax = "proto3";
+
+package infaas.internal;
+
+import "infaas/proto/internal/infaas_request_status.proto";
+
+service Query {
+  rpc QueryOnline(QueryOnlineRequest) returns (QueryOnlineResponse) {}
+  rpc QueryOffline(QueryOfflineRequest) returns (QueryOfflineResponse) {}
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {}
+}
+
+message QuerySLO {
+  int64 LatencyInUSec = 1;
+  float MinAccuracy = 2;
+  float MaxCost = 3;
+}
+
+message QueryOnlineRequest {
+  repeated bytes raw_input = 1; // infaas_k8s: raw JPEG bytes (one per request, batch 1)
+  repeated string model = 2;    // model-variant name(s); only one supported (as in the original)
+  QuerySLO slo = 3;
+  string submitter = 4;
+}
+
+message Box {
+  double x1 = 1;
+  double y1 = 2;
+  double x2 = 3;
+  double y2 = 4;
+  string label = 5;
+  double score = 6;
+}
+
+message QueryOnlineResponse {
+  repeated bytes raw_output = 1;
+  InfaasRequestStatus status = 2;
+  // ---- infaas_k8s additions ----
+  string label = 3;
+  repeated Box boxes = 4;
+  int32 img_width = 5;
+  int32 img_height = 6;
+  map<string, double> timings = 7;  // decode/preprocess/pre_wait/lock_wait/forward/postprocess/total/load
+  bool loaded = 8;                  // this request triggered the on-demand load
+  string variant = 9;
+  double latency_ms = 10;           // worker-measured, excluding the load
+}
+
+message QueryOfflineRequest {
+  string input_url = 1;
+  repeated string model = 2;
+  string output_url = 3;
+  QuerySLO slo = 4;
+  string submitter = 5;
+}
+
+message QueryOfflineResponse {
+  InfaasRequestStatus status = 1;
+}
+
+message HeartbeatRequest {
+  InfaasRequestStatus status = 1;
+}
+
+message HeartbeatResponse {
+  InfaasRequestStatus status = 1;
+}

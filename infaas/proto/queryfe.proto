@@ -1,0 +1,107 @@
+// Public API for users to submit queries to INFaaS.
+// Ported from INFaaS protos/queryfe.proto. Original fields are unchanged; fields
+// marked "infaas_k8s" are additions and use new field numbers only.
+
+syntax = "proto3";
+
+package infaaspublic.infaasqueryfe;
+
+import "infaas/proto/request_reply.proto";
+
+// Interface exported by INFaaS frontend.
+service Query {
+  // Online query, send input data in the payload
+  rpc QueryOnline(QueryOnlineRequest) returns (QueryOnlineResponse) {}
+
+  // Offline query, input data are stored on the cloud (out of scope: PLAN §0.4)
+  rpc QueryOffline(QueryOfflineRequest) returns (QueryOfflineResponse) {}
+
+  // All parent models with a specific task and dataset
+  rpc AllParentInfo(AllParRequest) returns (AllParResponse) {}
+
+  // Query model information
+  rpc QueryModelInfo(QueryModelInfoRequest) returns (QueryModelInfoResponse) {}
+
+  // Heartbeat
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {}
+}
+
+//=================== Message types for queries =============================
+message QuerySLO {
+  int64 LatencyInUSec = 1;  // Latency in micro-seconds.
+  float MinAccuracy = 2;    // Minimum accuracy. (unused: PLAN C1)
+  float MaxCost = 3;        // Maximum cost in dollar. (unused in the original too)
+}
+
+message QueryOnlineRequest {
+  repeated bytes raw_input = 1; // Serialized input in bytes. infaas_k8s: raw JPEG.
+  string grandparent_model = 2; // The name of the grandparent model. (unsupported)
+  string parent_model = 3;      // The name of the parent model (= Lumina model name).
+  string model_variant = 4;     // The name of the specific model variant; not required.
+  QuerySLO slo = 5;             // SLO provided by the user.
+  string submitter = 6;         // User who submitted the request
+}
+
+message Box {
+  double x1 = 1;
+  double y1 = 2;
+  double x2 = 3;
+  double y2 = 4;
+  string label = 5;
+  double score = 6;
+}
+
+message QueryOnlineResponse {
+  repeated bytes raw_output = 1;  // Serialized output in bytes. (label, utf-8)
+  RequestReply status = 2;
+  // ---- infaas_k8s additions ----
+  string variant = 3;             // chosen model-variant
+  string worker = 4;              // worker (pod) that served it
+  string hardware = 5;            // GPU type of the variant
+  double latency_ms = 6;          // front-end measured total
+  map<string, double> timings = 7;
+  string label = 8;               // top-1 label / "N objects"
+  string suggested_variant = 9;   // Algorithm 1 L8 (set when rejected)
+  string reject_kind = 10;        // no_variant | no_capacity | bad_request | worker_error
+  repeated Box detections = 11;
+  int32 img_width = 12;
+  int32 img_height = 13;
+  string path = 14;               // active | loading | inactive | fallback | direct
+}
+
+message QueryOfflineRequest {
+  string input_url = 1;
+  string model = 2;
+  string output_url = 3;
+  float maxcost = 4;
+  string submitter = 5;
+}
+
+message QueryOfflineResponse {
+  RequestReply status = 1;
+}
+
+message AllParRequest {
+  string task = 1;
+  string dataset = 2;
+}
+
+message AllParResponse {
+  AllParReply reply = 1;
+}
+
+message QueryModelInfoRequest {
+  string model = 1;
+}
+
+message QueryModelInfoResponse {
+  QueryModelReply reply = 1;
+}
+
+message HeartbeatRequest {
+  RequestReply status = 1;
+}
+
+message HeartbeatResponse {
+  RequestReply status = 1;
+}

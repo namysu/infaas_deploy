@@ -1,0 +1,17 @@
+// Message definition of gRPC request status.
+// Copied from INFaaS protos/internal/infaas_request_status.proto (unchanged).
+
+syntax = "proto3";
+
+package infaas.internal;
+
+enum InfaasRequestStatusEnum {
+  INVALID = 0;
+  SUCCESS = 1;
+  UNAVAILABLE = 2;
+}
+
+message InfaasRequestStatus {
+  InfaasRequestStatusEnum status = 1;
+  string msg = 2;  // Additional message.
+}

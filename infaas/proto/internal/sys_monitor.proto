@@ -1,0 +1,55 @@
+// Controller -> worker control service.
+// Ported from INFaaS protos/internal/sys_monitor.proto, where these RPCs were
+// declared but never implemented. ProfileVariant is an infaas_k8s addition: the
+// Variant-Profiler runs on a worker of the target GPU type (paper §3.2 "on a
+// single VM with the variant's target hardware").
+
+syntax = "proto3";
+
+package infaas.internal;
+
+import "infaas/proto/internal/infaas_request_status.proto";
+
+service SysStatus {
+  rpc ScaleUpModel(ScaleRequest) returns (ScaleResponse) {}
+  // Unload the variant from this worker (numreplicas ignored: GPU_MAX_REPLICAS = 1).
+  rpc ScaleDownModel(ScaleRequest) returns (ScaleResponse) {}
+  rpc MigrateModel(CreateMigrateRequest) returns (CreateMigrateResponse) {}
+  // Load the variant on this worker (blocks until Active).
+  rpc CreateModel(CreateMigrateRequest) returns (CreateMigrateResponse) {}
+  // infaas_k8s: one-time profiling of a variant on this worker's GPU.
+  rpc ProfileVariant(ProfileRequest) returns (ProfileResponse) {}
+}
+
+message ScaleRequest {
+  string model = 1;
+  int32 numreplicas = 2;
+}
+
+message ScaleResponse {
+  InfaasRequestStatus status = 1;
+}
+
+message CreateMigrateRequest {
+  string model = 1;
+  string hardware = 2;
+  int32 numreplicas = 3;
+}
+
+message CreateMigrateResponse {
+  InfaasRequestStatus status = 1;
+  double load_ms = 2;  // infaas_k8s
+}
+
+message ProfileRequest {
+  string model = 1;          // parent (short) model name
+  bytes image = 2;           // JPEG to profile with
+  int32 runs = 3;            // sequential runs for the latency average
+  double sat_seconds = 4;    // duration of the saturation-throughput run
+  int32 sat_concurrency = 5; // closed-loop clients in that run
+}
+
+message ProfileResponse {
+  InfaasRequestStatus status = 1;
+  string profile_json = 2;
+}

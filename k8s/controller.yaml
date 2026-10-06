@@ -1,0 +1,140 @@
+# INFaaS controller on the control-plane, hostNetwork like Lumina's server
+# (new_podexecutor/k8s/server.yaml), so both systems sit at the same place in
+# the network [PLAN A-06].
+#   :50052 native INFaaS Query API    :50053 Model Registrar
+#   :50054 Placement (worker -> controller)   :8081 Lumina-compatible podexec.Executor
+#   :16379 Redis Metadata Store (sidecar, same machine as the controller, paper §3.2)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infaas-controller
+  namespace: infaas
+  labels:
+    app: infaas-controller
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # hostNetwork ports: the old pod must go first
+  selector:
+    matchLabels:
+      app: infaas-controller
+  template:
+    metadata:
+      labels:
+        app: infaas-controller
+    spec:
+      serviceAccountName: infaas-controller
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: redis
+          image: infaas-controller:0.1.0
+          imagePullPolicy: Never
+          command: ["redis-server", "--port", "16379", "--bind", "0.0.0.0",
+                    "--protected-mode", "no", "--save", "", "--appendonly", "no"]
+          ports:
+            - containerPort: 16379
+          readinessProbe:
+            tcpSocket:
+              port: 16379
+            periodSeconds: 2
+        - name: controller
+          image: infaas-controller:0.1.0
+          imagePullPolicy: Never
+          command: ["python", "-m", "infaas.controller.main"]
+          envFrom:
+            - configMapRef:
+                name: infaas-config
+          env:
+            - name: REDIS_HOST
+              value: "127.0.0.1"
+            - name: REDIS_PORT
+              value: "16379"
+            - name: PROFILE_DIR
+              value: "/profiles"
+            # set to "<host>:8080" of a running Lumina server to answer
+            # dispatch="predict" (loadtest.py / cdf_bench.py ground truth)
+            - name: PREDICT_PROXY
+              value: ""
+          ports:
+            - containerPort: 50052
+            - containerPort: 50053
+            - containerPort: 50054
+            - containerPort: 8081
+          readinessProbe:
+            grpc:
+              port: 50052
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          volumeMounts:
+            - name: profiles
+              mountPath: /profiles
+            - name: logs
+              mountPath: /logs
+        - name: vm-autoscaler
+          image: infaas-controller:0.1.0
+          imagePullPolicy: Never
+          command: ["python", "-m", "infaas.controller.vm_autoscaler"]
+          envFrom:
+            - configMapRef:
+                name: infaas-config
+          env:
+            - name: REDIS_HOST
+              value: "127.0.0.1"
+            - name: REDIS_PORT
+              value: "16379"
+            - name: INFAAS_NAMESPACE
+              value: "infaas"
+          volumeMounts:
+            - name: logs
+              mountPath: /logs
+      volumes:
+        - name: profiles
+          hostPath:
+            path: /data/infaas-profiles
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /data/infaas-logs
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: infaas-redis
+  namespace: infaas
+spec:
+  selector:
+    app: infaas-controller
+  ports:
+    - name: redis
+      port: 16379
+      targetPort: 16379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: infaas-controller
+  namespace: infaas
+spec:
+  selector:
+    app: infaas-controller
+  ports:
+    - name: queryfe
+      port: 50052
+      targetPort: 50052
+    - name: modelreg
+      port: 50053
+      targetPort: 50053
+    - name: placement
+      port: 50054
+      targetPort: 50054
+    - name: compat
+      port: 8081
+      targetPort: 8081

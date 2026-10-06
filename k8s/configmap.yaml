@@ -1,0 +1,41 @@
+# Every value here overrides the default in infaas/common/config.py, where each
+# one is annotated with its source (paper / released code / user decision).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: infaas-config
+  namespace: infaas
+data:
+  # --- worker modes [U] ---------------------------------------------------
+  # static : every GPU has a worker (the infaas-worker-* Deployments), like Lumina
+  # dynamic: the VM-Autoscaler starts/stops worker pods (paper §4.2.3).
+  #          scripts/deploy.sh scales the Deployments to 0 in this mode.
+  WORKER_MODE: "static"
+  DYN_INIT_WORKERS: "2080ti:1,a5000:1,a30:1"   # dynamic: at start, and the scale-down floor
+  MAX_WORKERS: "2080ti:2,a5000:2,a30:2"        # GPUs per type in the cluster
+
+  # --- hardware cost [U C5, G1] ------------------------------------------
+  HW_TYPES: "2080ti,a5000,a30"
+  HW_COST: "2080ti:1,a5000:2,a30:4"
+  LAMBDA: "1.0"                                # [U G2]
+
+  # --- policy -------------------------------------------------------------
+  DECISION_MODE: "6"                           # [C] start_infaas.sh default
+  AUTOSCALER_TYPE: "infaas"                    # infaas | individual | none
+  SLACK_THRESHOLD: "1.05"                      # [P §5]
+  VM_UTIL_THRESHOLD: "80"                      # [P §4.2.3], SM utilization [U G3]
+  MONITOR_INTERVAL_S: "2.0"                    # [P §5]
+  MODEL_AUTOSCALER_INTERVAL_S: "1.0"           # [P §5]
+  VM_AUTOSCALER_INTERVAL_S: "2.0"              # [P §5]
+  # code-only executor blacklists (not in the paper; DEVIATIONS D-22)
+  EXEC_BLACKLIST_UTIL_ENABLED: "false"
+  EXEC_BLACKLIST_QPS_ENABLED: "false"
+
+  # --- profiler -----------------------------------------------------------
+  PROFILE_RUNS: "30"
+  PROFILE_SAT_SECONDS: "5"
+  PROFILE_SAT_CONCURRENCY: "4"
+
+  # --- logs (control-plane hostPath /data/infaas-logs) ----------------------
+  REQUEST_LOG: "/logs/requests.jsonl"
+  EVENT_LOG: "/logs/events.jsonl"
