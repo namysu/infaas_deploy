@@ -8,6 +8,10 @@ again. `submitter == "tester"` registers a stored profile directly, the way the
 original reads a pre-made `.config` [C modelreg_server.cc: submitter == "tester"].
 
 Profiling occupies the worker's GPU; register models before sending traffic.
+
+PROFILE_MODE=original (default) needs no image, as the original profiler;
+PROFILE_MODE=service needs the request image. A stored profile is reused only
+if it was measured in the current mode.
 """
 from __future__ import annotations
 
@@ -31,10 +35,16 @@ log = logging.getLogger("registrar")
 
 
 def import_profiles(md: RedisMetadata, root: Optional[str] = None) -> int:
-    n = 0
+    n = skipped = 0
     for p in profiles.load_all(root):
+        if not profiles.matches_mode(p):
+            skipped += 1
+            continue
         md.add_model(p)
         n += 1
+    if skipped:
+        log.warning("skipped %d stored profiles measured with another PROFILE_MODE "
+                    "(current: %s); register those models again", skipped, config.PROFILE_MODE)
     return n
 
 
@@ -56,6 +66,10 @@ class Registrar(modelreg_pb2_grpc.ModelRegServicer):
                 p = profiles.validate(json.loads(request.profile_json))
             except Exception as e:  # noqa: BLE001
                 return self._reply(False, f"bad profile: {e}")
+            if not profiles.matches_mode(p):
+                return self._reply(False, f"profile was measured with PROFILE_MODE="
+                                          f"{profiles.mode_of(p)}, this deployment uses "
+                                          f"{config.PROFILE_MODE}")
             self.md.add_model(p)
             profiles.save(p)
             self.registry.invalidate()
@@ -81,11 +95,11 @@ class Registrar(modelreg_pb2_grpc.ModelRegServicer):
     def _one(self, model: str, hw: str, image: bytes, reprofile: bool) -> Tuple[str, str]:
         v = variant_name(model, hw)
         stored = None if reprofile else profiles.load(v)
-        if stored is not None:
+        if stored is not None and profiles.matches_mode(stored):
             self.md.add_model(stored)
             return v, ""
-        if not image:
-            return v, f"{v}: no stored profile and no profile_image to measure with"
+        if not image and config.PROFILE_MODE == "service":
+            return v, f"{v}: PROFILE_MODE=service needs a profile_image to measure with"
         with self._hw_locks[hw]:
             worker, addr = self._pick_worker(hw)
             if not worker:

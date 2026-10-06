@@ -26,6 +26,16 @@ def validate(p: dict) -> dict:
     return p
 
 
+def mode_of(p: dict) -> str:
+    """How the profile was measured; profiles from before the field are "service"."""
+    return str(p.get("profile_mode", "service")).lower()
+
+
+def matches_mode(p: dict, mode: Optional[str] = None) -> bool:
+    """Latencies from the two modes mean different things and must not be mixed."""
+    return mode_of(p) == (mode or config.PROFILE_MODE)
+
+
 def path_for(variant: str, root: Optional[str] = None) -> Path:
     return Path(root or config.PROFILE_DIR) / f"{variant}.json"
 

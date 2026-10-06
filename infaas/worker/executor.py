@@ -6,6 +6,10 @@ one model-variant per request, loaded on demand when it is not resident
 The load, when it happens, is reported separately and kept out of the latency
 statistics: the paper's Interfered state compares *inference* latency with the
 profile (§4), and a cold load is not that.
+
+The latency fed to those statistics measures what the profile measured
+(PROFILE_MODE): `original` -> GPU queue + forward, as the original worker timed
+QueryModelOnline on an already-preprocessed tensor; `service` -> the whole path.
 """
 from __future__ import annotations
 
@@ -15,6 +19,7 @@ import time
 
 import grpc
 
+from infaas.common import config
 from infaas.common.naming import parse_variant
 from infaas.proto.internal import (infaas_request_status_pb2 as st, query_pb2, query_pb2_grpc,
                                    sys_monitor_pb2, sys_monitor_pb2_grpc)
@@ -67,7 +72,8 @@ class QueryService(query_pb2_grpc.QueryServicer):
             resp.status.CopyFrom(_status(False, f"inference failed: {e}"))
             return resp
         lat = tm["total"]
-        counters.end(lat)
+        counters.end(lat if config.PROFILE_MODE == "service"
+                     else tm["lock_wait"] + tm["forward"])
         tm["load"] = load_ms
         tm["swap"] = load_ms           # name Lumina's scripts read for model movement
         tm["wall"] = (time.perf_counter() - t0) * 1000.0

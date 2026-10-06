@@ -3,7 +3,9 @@
 Profiles every (model, GPU type) variant on a worker of that type unless a stored
 profile exists, or imports stored profiles from a directory.
 
-    # profile all 43 Lumina models on every GPU type (workers must be up, no traffic)
+    # profile all 43 Lumina models on every GPU type (workers must be up, no traffic).
+    # PROFILE_MODE=original (default) needs no image; service needs --image
+    python -m infaas.cli.register --controller <cp-ip>:50053 --all
     python -m infaas.cli.register --controller <cp-ip>:50053 --image frame_1080p.jpg --all
     # a few models, again even if profiled before
     python -m infaas.cli.register --controller <cp-ip>:50053 --image frame_1080p.jpg \
@@ -30,7 +32,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--controller", required=True, help="host:port of the Model Registrar")
-    ap.add_argument("--image", help="JPEG the profiler measures with (use the experiment image)")
+    ap.add_argument("--image", help="JPEG to profile with (PROFILE_MODE=service only; "
+                                    "use the experiment image)")
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--all", action="store_true", help="all 43 Lumina models")
     g.add_argument("--models", help="comma-separated short names")

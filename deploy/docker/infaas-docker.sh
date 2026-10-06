@@ -9,7 +9,7 @@
 #   deploy/docker/infaas-docker.sh down                 stop and remove the containers
 #   deploy/docker/infaas-docker.sh ps | logs [service]  status / logs (docker compose)
 #   deploy/docker/infaas-docker.sh state                workers, variants, states (Metadata Store)
-#   deploy/docker/infaas-docker.sh register IMAGE [register args]   profile + register models
+#   deploy/docker/infaas-docker.sh register [--all|--models a,b] [--image F]   profile + register
 #   deploy/docker/infaas-docker.sh query MODEL IMAGE SLO_MS [-n N]  one request, native API
 #
 # INFAAS_ENV=<file> selects another settings file (default: infaas-docker.env here).
@@ -75,10 +75,17 @@ case "$cmd" in
     docker run --rm "${NET_ARGS[@]}" "$CONTROLLER_IMAGE" \
       python -m infaas.cli.state --redis "$REDIS:16379" "$@" ;;
   register)
-    img="${1:?usage: register IMAGE [--all | --models a,b] [--reprofile]}"; shift
-    [ $# -gt 0 ] || set -- --all
-    docker run --rm "${NET_ARGS[@]}" -v "$(realpath "$img"):/in/image.jpg:ro" "$CONTROLLER_IMAGE" \
-      python -m infaas.cli.register --controller "$CTRL:50053" --image /in/image.jpg "$@" ;;
+    # PROFILE_MODE=original needs no image; service needs --image FILE
+    vol=(); img_arg=(); args=()
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --image) vol=(-v "$(realpath "$2"):/in/image.jpg:ro"); img_arg=(--image /in/image.jpg); shift 2 ;;
+        *) args+=("$1"); shift ;;
+      esac
+    done
+    [ ${#args[@]} -gt 0 ] || args=(--all)
+    docker run --rm "${NET_ARGS[@]}" "${vol[@]}" "$CONTROLLER_IMAGE" \
+      python -m infaas.cli.register --controller "$CTRL:50053" "${img_arg[@]}" "${args[@]}" ;;
   query)
     model="${1:?usage: query MODEL IMAGE SLO_MS [-n N]}"; img="${2:?image}"; slo="${3:?slo_ms}"; shift 3
     docker run --rm "${NET_ARGS[@]}" -v "$(realpath "$img"):/in/image.jpg:ro" "$CONTROLLER_IMAGE" \

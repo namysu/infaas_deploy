@@ -32,6 +32,10 @@ data:
   EXEC_BLACKLIST_QPS_ENABLED: "false"
 
   # --- profiler -----------------------------------------------------------
+  # service: profile the worker's whole path on the experiment JPEG (decode +
+  # preprocess included) — the Lumina comparison's choice [U C6].
+  # original: forward only on a random tensor, no image (the released profiler).
+  PROFILE_MODE: "service"
   PROFILE_RUNS: "30"
   PROFILE_SAT_SECONDS: "5"
   PROFILE_SAT_CONCURRENCY: "4"

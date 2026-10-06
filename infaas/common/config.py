@@ -137,6 +137,16 @@ REGISTRY_CACHE_S = _f("REGISTRY_CACHE_S", 5.0)
 EXECUTOR_CACHE_S = _f("EXECUTOR_CACHE_S", 1.0)
 
 # ---------------------------------------------------------------- profiler
+# What a variant's "inference latency" is, for profiling and for the monitoring
+# daemon's comparison against it (both must measure the same thing):
+#   original  model forward on a ready input tensor of the model's input size,
+#             random values, no image needed; the worker's observed latency is
+#             GPU queue + forward. As the original profiler [C trtis_perf_client.cc,
+#             profile_model.sh] and executor (client-side preprocessing) work.
+#   service   the worker's whole path on a real JPEG, decode + preprocess included,
+#             measured with an image given at registration [U C6] — used for the
+#             Lumina comparison (k8s/configmap.yaml)
+PROFILE_MODE = _s("PROFILE_MODE", "original").lower()
 # [C profile_model.sh] latency = average of repeated single-concurrency runs
 PROFILE_RUNS = _i("PROFILE_RUNS", 30)
 # [N] saturation throughput Q_ij (paper Table 2 / §4.2.1) is measured closed-loop

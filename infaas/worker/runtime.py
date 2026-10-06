@@ -94,6 +94,7 @@ class Instance:
         self._inflight = 0
         self._inflight_lock = threading.Lock()
         self.loaded_at = time.time()
+        self.ready_ms = 0.0                   # load time up to "ready", set by Runtime._build
         # Every forward pass runs on this one thread (a Triton model instance has
         # its own execution thread too). cuDNN keeps handles and execution-plan
         # caches per calling thread; forwards arriving from different gRPC
@@ -141,6 +142,30 @@ class Instance:
             with self._inflight_lock:
                 self._inflight -= 1
 
+    def _forward(self, inputs: Dict[str, torch.Tensor]):
+        """Run one forward pass on the instance's execution thread."""
+        box = {"done": threading.Event()}
+        self._jobs.put((inputs, box))
+        box["done"].wait()
+        if "err" in box:
+            raise box["err"]
+        return box["out"], box["t_locked"], box["t_fwd"]
+
+    def forward_only(self, inputs: Dict[str, torch.Tensor]) -> float:
+        """Forward pass on an already-preprocessed input; returns its ms.
+
+        What the original profiler times: the model on a ready input tensor,
+        with no image decode or preprocessing (PROFILE_MODE=original).
+        """
+        with self._inflight_lock:
+            self._inflight += 1
+        try:
+            _, t_locked, t_fwd = self._forward(inputs)
+            return (t_fwd - t_locked) * 1000.0
+        finally:
+            with self._inflight_lock:
+                self._inflight -= 1
+
     def _infer(self, image_bytes: bytes):
         t0 = time.perf_counter()
         if self.dali_cfg is not None:
@@ -156,12 +181,7 @@ class Instance:
             inputs = dict(self.processor(images=img, return_tensors="pt"))
             pre_wait = 0.0
         t_pre = time.perf_counter()
-        box = {"done": threading.Event()}
-        self._jobs.put((inputs, box))
-        box["done"].wait()
-        if "err" in box:
-            raise box["err"]
-        out, t_locked, t_fwd = box["out"], box["t_locked"], box["t_fwd"]
+        out, t_locked, t_fwd = self._forward(inputs)
         label, boxes = _decode(out, self.model, self.processor, img_size)
         t_end = time.perf_counter()
         ms = lambda a, b: (b - a) * 1000.0  # noqa: E731
@@ -255,6 +275,7 @@ class Runtime:
             ev.set()
 
     def _build(self, variant: str, model_id: str) -> Instance:
+        t0 = time.perf_counter()
         cls = _autoclass(models.MODEL_AUTOCLASS[model_id])
         model = cls.from_pretrained(model_id).eval()
         processor = _get_processor(model_id)
@@ -264,6 +285,9 @@ class Runtime:
             dali_cfg, note = dali_preprocess.evaluate(model_id, processor, *self._probe)
             note = ("DALI " if dali_cfg is not None else "PIL: ") + note
         inst = Instance(variant, model_id, model, processor, dali_cfg, note)
+        # ready to run, before the warmup queries: the original profiler's load
+        # latency stops here (copy -> MODEL_READY, [C profile_model.sh:254-266])
+        inst.ready_ms = (time.perf_counter() - t0) * 1000.0
         warm = self._probe[0] if self._probe is not None else self._fallback_jpeg
         for _ in range(config.WARMUP_QUERIES):
             inst.infer(warm)
